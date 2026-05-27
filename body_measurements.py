@@ -1,25 +1,43 @@
 # body_measurements.py
+"""
+Cải tiến: xử lý các trường hợp
+  1. Tay dang ngang hoàn toàn (T-pose) → shoulder bị kéo dài theo tay
+  2. Tay dính vào hông/eo → biên mask bị mở rộng theo tay
+  3. Tay cúp xuống sát thân → không bị loại sai
+
+Chiến lược:
+  - Không dùng keypoint làm mốc độ dài.
+  - Dùng "contour narrowing" (tìm điểm lõm trên profile ngang) để phát hiện
+    chỗ tay tách khỏi thân, sau đó cắt tại điểm lõm đó.
+  - Kết hợp arm skeleton để ưu tiên loại trừ vùng tay đúng phía.
+"""
 
 import json
 import numpy as np
 import config
 
-LEFT_SHOULDER  = config.LEFT_SHOULDER
-RIGHT_SHOULDER = config.RIGHT_SHOULDER
-LEFT_ELBOW     = config.LEFT_ELBOW
-RIGHT_ELBOW    = config.RIGHT_ELBOW
-LEFT_WRIST     = config.LEFT_WRIST
-RIGHT_WRIST    = config.RIGHT_WRIST
-LEFT_HIP       = config.LEFT_HIP
-RIGHT_HIP      = config.RIGHT_HIP
+LEFT_SHOULDER   = config.LEFT_SHOULDER
+RIGHT_SHOULDER  = config.RIGHT_SHOULDER
+LEFT_ELBOW      = config.LEFT_ELBOW
+RIGHT_ELBOW     = config.RIGHT_ELBOW
+LEFT_WRIST      = config.LEFT_WRIST
+RIGHT_WRIST     = config.RIGHT_WRIST
+LEFT_HIP        = config.LEFT_HIP
+RIGHT_HIP       = config.RIGHT_HIP
 
-WAIST_T             = config.WAIST_T
-ROW_HALF_BAND       = config.ROW_HALF_BAND
-ARM_PAD_PX          = config.ARM_PAD_PX
+WAIST_T                 = config.WAIST_T
+ROW_HALF_BAND           = config.ROW_HALF_BAND
+ARM_PAD_PX              = config.ARM_PAD_PX
 BODY_CENTER_SEARCH_HALF = config.BODY_CENTER_SEARCH_HALF
+TORSO_CORRIDOR_MARGIN   = 8
 
-# Margin thêm vào torso corridor (pixel) để không clamp quá chặt
-TORSO_CORRIDOR_MARGIN = 8
+# ── Concavity detection ────────────────────────────────────────────────────
+# Khi scan profile ngang, nếu có đoạn lõm (gap hoặc narrow neck) giữa thân
+# và tay thì đó là điểm cắt tự nhiên.  Nếu không có gap, dùng gradient âm
+# mạnh để phát hiện "neck" chỗ tay gắn vào thân.
+CONCAVITY_SEARCH_ROWS   = 30   # scan ±N row để tìm điểm lõm
+MIN_CONCAVITY_DROP      = 6    # số pixel drop để coi là điểm lõm đáng kể
+GAP_THRESHOLD           = 2    # pixel gap (0-pixel trong mask) = đứt hẳn
 
 
 def load_keypoints(path: str = "keypoints.json") -> dict:
@@ -33,13 +51,27 @@ def _kp_xy(kp: dict, idx: int) -> np.ndarray:
     return np.array([p["x_pixel"], p["y_pixel"]], dtype=float)
 
 
+# ── Arm geometry helpers ───────────────────────────────────────────────────
+
+def _is_arm_horizontal(arm_pts: list) -> bool:
+    """True nếu tay dang ngang (góc so với ngang < threshold)."""
+    if len(arm_pts) < 2:
+        return False
+    shoulder, wrist = arm_pts[0], arm_pts[-1]
+    dx = abs(wrist[0] - shoulder[0])
+    dy = abs(wrist[1] - shoulder[1])
+    if dx < 1:
+        return False
+    return (dy / dx) < config.ARM_HORIZONTAL_THRESHOLD
+
+
 def _arm_x_range_at_y(
     arm_pts: list,
     target_y: float,
     band: int = ROW_HALF_BAND,
     pad: int = ARM_PAD_PX,
 ) -> tuple | None:
-    """Trả về (x_min, x_max) của đoạn tay tại target_y, hoặc None."""
+    """Trả về (x_min, x_max) của skeleton tay tại target_y, hoặc None."""
     if not arm_pts:
         return None
     xs = []
@@ -58,17 +90,144 @@ def _arm_x_range_at_y(
     return (min(xs) - pad, max(xs) + pad)
 
 
-def _is_arm_horizontal(arm_pts: list) -> bool:
-    """True nếu tay đang dang ngang (góc < threshold so với ngang)."""
-    if not arm_pts:
-        return False
-    shoulder, wrist = arm_pts[0], arm_pts[-1]
-    dx = abs(wrist[0] - shoulder[0])
-    dy = abs(wrist[1] - shoulder[1])
-    if dx < 1:
-        return False
-    return (dy / dx) < config.ARM_HORIZONTAL_THRESHOLD
+# ── Profile analysis ───────────────────────────────────────────────────────
 
+def _row_profile(mask: np.ndarray, center_y: int, half_band: int = ROW_HALF_BAND):
+    """Trả về mảng bool 1-D: cột nào có foreground pixel trong band."""
+    H = mask.shape[0]
+    y0 = max(0, center_y - half_band)
+    y1 = min(H - 1, center_y + half_band)
+    return mask[y0:y1 + 1, :].any(axis=0)
+
+
+def _find_gap_or_concavity(
+    col_hits: np.ndarray,
+    start_x: int,
+    direction: int,       # -1 = trái, +1 = phải
+    arm_xmin: float,
+    arm_xmax: float,
+) -> int | None:
+    """
+    Scan từ start_x ra phía direction.
+    Trong vùng arm (arm_xmin..arm_xmax):
+      - Nếu gặp gap (0-pixel ≥ GAP_THRESHOLD) → trả về x ngay trước gap
+      - Nếu không có gap → trả về None (không cắt)
+    Ngoài vùng arm → không cắt.
+    """
+    W = len(col_hits)
+    gap_count = 0
+    last_body = start_x
+
+    for x in range(start_x, -1 if direction < 0 else W, direction):
+        in_arm_zone = arm_xmin <= x <= arm_xmax
+
+        if col_hits[x]:
+            gap_count = 0
+            if not in_arm_zone:
+                # Ngoài vùng arm mà vẫn có mask → đây là thân, ghi nhận
+                last_body = x
+        else:
+            gap_count += 1
+            if in_arm_zone and gap_count >= GAP_THRESHOLD:
+                # Gap trong vùng tay → điểm cắt là x ngay trước gap
+                return last_body
+
+    return None
+
+
+def _find_body_edge_with_concavity(
+    mask: np.ndarray,
+    center_y: int,
+    cx: int,
+    side: str,             # "left" | "right"
+    arm_pts: list,         # skeleton tay phía đó
+    search_rows: int = CONCAVITY_SEARCH_ROWS,
+) -> int:
+    """
+    Tìm biên thân thực tế tại center_y, xử lý tay dính vào thân.
+
+    Thuật toán:
+    1. Lấy profile tại center_y.
+    2. Nếu arm skeleton không đi qua center_y → scan thẳng, lấy biên mask.
+    3. Nếu arm skeleton đi qua center_y:
+       a. Tìm gap trong vùng arm → cắt tại gap.
+       b. Nếu không có gap → scan ±search_rows row, chọn row có width
+          NHỎ NHẤT trong vùng ngoài torso_x, rồi dùng đó làm ước tính
+          ("narrowest cross-section" = eo/hông thực, không phải tay).
+          Sau đó project ngược lại center_y.
+    """
+    H, W = mask.shape
+    direction = -1 if side == "left" else 1
+
+    col_hits = _row_profile(mask, center_y)
+    arm_range = _arm_x_range_at_y(arm_pts, center_y) if arm_pts else None
+
+    # Không có tay tại row này → lấy biên mask bình thường
+    if arm_range is None:
+        return _simple_edge(col_hits, cx, direction, W)
+
+    arm_xmin, arm_xmax = arm_range
+
+    # Thử tìm gap trong vùng tay
+    gap_cut = _find_gap_or_concavity(col_hits, cx, direction, arm_xmin, arm_xmax)
+    if gap_cut is not None:
+        return gap_cut
+
+    # Không có gap → dùng "narrowest row" trong vùng xung quanh
+    # Scan nhiều row, tìm row có biên ngoài nhỏ nhất (= chỉ thân, không có tay)
+    best_edge = _simple_edge(col_hits, cx, direction, W)
+    best_edge_in_torso = True  # mặc định dùng biên hiện tại
+
+    narrow_edges = []
+    for dy in range(-search_rows, search_rows + 1):
+        ry = center_y + dy
+        if ry < 0 or ry >= H:
+            continue
+        rc = _row_profile(mask, ry, half_band=ROW_HALF_BAND)
+        r_arm_range = _arm_x_range_at_y(arm_pts, ry) if arm_pts else None
+
+        if r_arm_range is None:
+            # Row này không có tay → edge này là "pure body"
+            e = _simple_edge(rc, cx, direction, W)
+            narrow_edges.append((abs(e - cx), e, ry))
+        else:
+            # Row này có tay → thử tìm gap
+            rxmin, rxmax = r_arm_range
+            gap = _find_gap_or_concavity(rc, cx, direction, rxmin, rxmax)
+            if gap is not None:
+                narrow_edges.append((abs(gap - cx), gap, ry))
+
+    if narrow_edges:
+        # Chọn edge ngắn nhất (thân hẹp nhất = không có tay)
+        narrow_edges.sort(key=lambda t: t[0])
+        best_half_width = narrow_edges[0][0]
+
+        # Áp dụng: dùng half_width này để xác định biên tại center_y
+        # Scan từ cx theo direction, lấy pixel thứ best_half_width
+        count = 0
+        for x in range(cx, -1 if direction < 0 else W, direction):
+            if col_hits[x]:
+                count += 1
+                if count >= best_half_width:
+                    return x
+            # Nếu gặp gap nhỏ trong vùng arm thì dừng
+            elif arm_xmin <= x <= arm_xmax:
+                break
+
+    return _simple_edge(col_hits, cx, direction, W)
+
+
+def _simple_edge(col_hits: np.ndarray, cx: int, direction: int, W: int) -> int:
+    """Scan từ cx ra direction, trả về column cuối cùng có foreground."""
+    edge = cx
+    for x in range(cx, -1 if direction < 0 else W, direction):
+        if not col_hits[x]:
+            break
+        edge = x
+    return edge
+
+
+# ── Torso corridor ─────────────────────────────────────────────────────────
 
 def _body_center_x(mask: np.ndarray, center_y: int) -> float:
     H, W = mask.shape
@@ -81,84 +240,7 @@ def _body_center_x(mask: np.ndarray, center_y: int) -> float:
     return float((cols[0] + cols[-1]) / 2.0)
 
 
-def _arm_overlaps_mask_outside_torso(
-    mask: np.ndarray,
-    arm_range: tuple,          # (x_min, x_max) của tay tại row này
-    torso_left: float,
-    torso_right: float,
-    center_y: int,
-    side: str,                 # "left" hoặc "right"
-) -> bool:
-    """
-    Kiểm tra tay có pixel mask nằm NGOÀI torso corridor không.
-    Nếu có → tay thực sự lộ ra ngoài thân → cần loại trừ.
-    Nếu không → tay đang nằm hoàn toàn trước thân → không loại trừ.
-    """
-    arm_xmin, arm_xmax = arm_range
-    H, W = mask.shape
-    y0 = max(0, center_y - ROW_HALF_BAND)
-    y1 = min(H - 1, center_y + ROW_HALF_BAND)
-
-    if side == "left":
-        # Kiểm tra pixel tay bên trái corridor
-        x_start = max(0, int(arm_xmin))
-        x_end   = min(W - 1, int(torso_left))
-        if x_start >= x_end:
-            return False
-        region = mask[y0:y1 + 1, x_start:x_end]
-    else:
-        # Kiểm tra pixel tay bên phải corridor
-        x_start = max(0, int(torso_right))
-        x_end   = min(W - 1, int(arm_xmax))
-        if x_start >= x_end:
-            return False
-        region = mask[y0:y1 + 1, x_start:x_end]
-
-    return bool(region.any())
-
-
-def _scan_border(
-    col_hits: np.ndarray,
-    cx: int,
-    W: int,
-    arm_range: tuple | None,
-    torso_inner: float,   # shoulder_x hoặc hip_x phía trong
-    torso_outer: float,   # hard boundary: arm chỉ block nếu ngoài đây
-    side: str,            # "left" hoặc "right"
-    arm_is_outside: bool, # kết quả từ _arm_overlaps_mask_outside_torso
-) -> int:
-    """
-    Scan từ center (cx) ra biên, trả về column cuối cùng thuộc thân.
-
-    Logic:
-      - Luôn đi qua pixel trong [torso_outer_left, torso_outer_right]
-      - Nếu gặp arm_range VÀ arm thực sự lộ ngoài torso → dừng
-      - Nếu arm nằm hoàn toàn trong torso → bỏ qua arm_range, tiếp tục scan mask
-    """
-    col = cx
-    if side == "left":
-        rng = range(cx, -1, -1)
-        def inside_torso(x): return x >= torso_outer
-    else:
-        rng = range(cx, W)
-        def inside_torso(x): return x <= torso_outer
-
-    for x in rng:
-        if not col_hits[x]:
-            break
-        if arm_range is not None and arm_is_outside:
-            arm_xmin, arm_xmax = arm_range
-            if arm_xmin <= x <= arm_xmax:
-                if inside_torso(x):
-                    # Trong torso corridor → vẫn tính là thân
-                    col = x
-                    continue
-                else:
-                    # Ngoài torso corridor và trong arm range → dừng
-                    break
-        col = x
-    return col
-
+# ── Core measurement functions ─────────────────────────────────────────────
 
 def _measure_row(
     mask: np.ndarray,
@@ -166,51 +248,19 @@ def _measure_row(
     body_cx: float,
     left_arm_pts: list,
     right_arm_pts: list,
-    torso_left_x: float,    # biên trái của torso corridor
-    torso_right_x: float,   # biên phải của torso corridor
 ) -> dict:
-    """
-    Đo width của thân tại một row, loại trừ tay chỉ khi tay lộ ra ngoài torso.
-    """
-    H, W = mask.shape
-    y0 = max(0, center_y - ROW_HALF_BAND)
-    y1 = min(H - 1, center_y + ROW_HALF_BAND)
-    col_hits = mask[y0:y1 + 1, :].any(axis=0)
+    """Đo width tại một row, dùng concavity để loại tay."""
     cx = int(round(body_cx))
 
-    left_arm_range  = _arm_x_range_at_y(left_arm_pts,  center_y)
-    right_arm_range = _arm_x_range_at_y(right_arm_pts, center_y)
-
-    # Kiểm tra tay có lộ ra ngoài torso corridor không
-    left_arm_outside = False
-    if left_arm_range is not None:
-        left_arm_outside = _arm_overlaps_mask_outside_torso(
-            mask, left_arm_range,
-            torso_left_x, torso_right_x,
-            center_y, "left"
-        )
-
-    right_arm_outside = False
-    if right_arm_range is not None:
-        right_arm_outside = _arm_overlaps_mask_outside_torso(
-            mask, right_arm_range,
-            torso_left_x, torso_right_x,
-            center_y, "right"
-        )
-
-    left_col = _scan_border(
-        col_hits, cx, W,
-        left_arm_range, torso_left_x, torso_left_x,
-        "left", left_arm_outside
+    left_col = _find_body_edge_with_concavity(
+        mask, center_y, cx, "left", left_arm_pts
     )
-    right_col = _scan_border(
-        col_hits, cx, W,
-        right_arm_range, torso_right_x, torso_right_x,
-        "right", right_arm_outside
+    right_col = _find_body_edge_with_concavity(
+        mask, center_y, cx, "right", right_arm_pts
     )
 
-    p0  = np.array([left_col,  center_y], dtype=float)
-    p1  = np.array([right_col, center_y], dtype=float)
+    p0 = np.array([left_col,  center_y], dtype=float)
+    p1 = np.array([right_col, center_y], dtype=float)
     return {
         "p0":       p0,
         "p1":       p1,
@@ -222,73 +272,40 @@ def _measure_row(
 def _measure_shoulder(
     mask: np.ndarray,
     shoulder_y: int,
-    ls: np.ndarray, rs: np.ndarray,
-    left_arm_pts: list, right_arm_pts: list,
-    torso_left_x: float, torso_right_x: float,
+    ls: np.ndarray,
+    rs: np.ndarray,
+    left_arm_pts: list,
+    right_arm_pts: list,
 ) -> dict:
     """
-    Đo shoulder:
-    - Nếu tay lộ ngoài torso tại shoulder_y → clamp về shoulder keypoint
-    - Nếu tay không lộ (tay ôm thân hoặc không có mặt) → lấy mask
+    Đo shoulder width.
+    Với tay dang ngang: arm_pts = [] → scan mask thẳng nhưng bị giới hạn
+    bởi concavity của profile (chỗ tay gắn vào vai tạo lõm).
     """
     H, W = mask.shape
-    y0 = max(0, shoulder_y - ROW_HALF_BAND)
-    y1 = min(H - 1, shoulder_y + ROW_HALF_BAND)
-    col_hits = mask[y0:y1 + 1, :].any(axis=0)
-
     body_cx = (ls[0] + rs[0]) / 2.0
     cx = int(round(body_cx))
 
-    left_arm_range  = _arm_x_range_at_y(left_arm_pts,  shoulder_y)
-    right_arm_range = _arm_x_range_at_y(right_arm_pts, shoulder_y)
+    left_col = _find_body_edge_with_concavity(
+        mask, shoulder_y, cx, "left", left_arm_pts,
+        search_rows=CONCAVITY_SEARCH_ROWS,
+    )
+    right_col = _find_body_edge_with_concavity(
+        mask, shoulder_y, cx, "right", right_arm_pts,
+        search_rows=CONCAVITY_SEARCH_ROWS,
+    )
 
-    left_arm_outside = False
-    if left_arm_range is not None:
-        left_arm_outside = _arm_overlaps_mask_outside_torso(
-            mask, left_arm_range,
-            torso_left_x, torso_right_x,
-            shoulder_y, "left"
-        )
-
-    right_arm_outside = False
-    if right_arm_range is not None:
-        right_arm_outside = _arm_overlaps_mask_outside_torso(
-            mask, right_arm_range,
-            torso_left_x, torso_right_x,
-            shoulder_y, "right"
-        )
-
-    # Biên trái
-    if left_arm_outside:
-        # Tay lộ ra ngoài → clamp về shoulder keypoint (không để mask kéo ra)
-        final_left = float(min(ls[0], rs[0]))
-    else:
-        # Tay không lộ hoặc không có → scan mask tự do
-        final_left = float(cx)
-        for x in range(cx, -1, -1):
-            if not col_hits[x]:
-                break
-            final_left = float(x)
-
-    # Biên phải
-    if right_arm_outside:
-        final_right = float(max(ls[0], rs[0]))
-    else:
-        final_right = float(cx)
-        for x in range(cx, W):
-            if not col_hits[x]:
-                break
-            final_right = float(x)
-
-    p0  = np.array([final_left,  shoulder_y], dtype=float)
-    p1  = np.array([final_right, shoulder_y], dtype=float)
+    p0 = np.array([left_col,  shoulder_y], dtype=float)
+    p1 = np.array([right_col, shoulder_y], dtype=float)
     return {
         "p0":       p0,
         "p1":       p1,
-        "width_px": float(final_right - final_left),
+        "width_px": float(right_col - left_col),
         "midpoint": (p0 + p1) / 2.0,
     }
 
+
+# ── Public API ─────────────────────────────────────────────────────────────
 
 def estimate_measurements(kp: dict, mask: np.ndarray) -> tuple[dict, dict]:
     ls = _kp_xy(kp, LEFT_SHOULDER)
@@ -306,25 +323,20 @@ def estimate_measurements(kp: dict, mask: np.ndarray) -> tuple[dict, dict]:
     left_arm_horizontal  = _is_arm_horizontal(left_arm_pts)
     right_arm_horizontal = _is_arm_horizontal(right_arm_pts)
 
-    shoulder_y  = int(round((ls[1] + rs[1]) / 2.0))
-    hip_y   = int(round((lh[1] + rh[1]) / 2.0))
-    waist_y = int(round(shoulder_y + WAIST_T * (hip_y - shoulder_y)))
-
-    # ── Torso corridor ────────────────────────────────────────────────────────
-    # Vùng X chắc chắn thuộc thân: từ keypoint trong cùng ± margin
-    # Dùng min/max của shoulder + hip để bao phủ toàn thân
-    torso_left_x  = min(ls[0], lh[0], rs[0], rh[0]) - TORSO_CORRIDOR_MARGIN
-    torso_right_x = max(ls[0], lh[0], rs[0], rh[0]) + TORSO_CORRIDOR_MARGIN
-
-    # Tay ngang → loại trừ hoàn toàn khỏi arm_pts khi scan
-    eff_left_arm  = left_arm_pts  if not left_arm_horizontal  else []
+    # Tay ngang → truyền [] để concavity search hoạt động trên profile thuần
+    # (không có skeleton tay làm reference, nhưng profile sẽ tự nhiên hẹp hơn
+    # vì chúng ta tìm narrowest cross-section)
+    eff_left_arm  = left_arm_pts  if not left_arm_horizontal else []
     eff_right_arm = right_arm_pts if not right_arm_horizontal else []
 
-    # ── shoulder ──────────────────────────────────────────────────────────────────
+    shoulder_y = int(round((ls[1] + rs[1]) / 2.0))
+    hip_y      = int(round((lh[1] + rh[1]) / 2.0))
+    waist_y    = int(round(shoulder_y + WAIST_T * (hip_y - shoulder_y)))
+
+    # ── Shoulder ──────────────────────────────────────────────────────────────
     shoulder_info = _measure_shoulder(
         mask, shoulder_y, ls, rs,
         eff_left_arm, eff_right_arm,
-        torso_left_x, torso_right_x,
     )
 
     # ── Waist & Hip ───────────────────────────────────────────────────────────
@@ -334,28 +346,28 @@ def estimate_measurements(kp: dict, mask: np.ndarray) -> tuple[dict, dict]:
     waist_info = _measure_row(
         mask, waist_y, waist_cx,
         eff_left_arm, eff_right_arm,
-        torso_left_x, torso_right_x,
     )
     hip_info = _measure_row(
         mask, hip_y, hip_cx,
         eff_left_arm, eff_right_arm,
-        torso_left_x, torso_right_x,
     )
 
     # ── Ratios ────────────────────────────────────────────────────────────────
     ref = shoulder_info["width_px"] if shoulder_info["width_px"] > 0 else 1.0
     measurements = {
-        "shoulder_ratio":  round(shoulder_info["width_px"]  / ref, 3),
-        "waist_ratio": round(waist_info["width_px"] / ref, 3),
-        "hip_ratio":   round(hip_info["width_px"]   / ref, 3),
-        "shoulder_px":     round(shoulder_info["width_px"],  1),
-        "waist_px":    round(waist_info["width_px"], 1),
-        "hip_px":      round(hip_info["width_px"],   1),
+        "shoulder_ratio": round(shoulder_info["width_px"] / ref, 3),
+        "waist_ratio":    round(waist_info["width_px"]    / ref, 3),
+        "hip_ratio":      round(hip_info["width_px"]      / ref, 3),
+        "shoulder_px":    round(shoulder_info["width_px"], 1),
+        "waist_px":       round(waist_info["width_px"],    1),
+        "hip_px":         round(hip_info["width_px"],      1),
     }
 
     lines = {"shoulder": shoulder_info, "waist": waist_info, "hip": hip_info}
     return measurements, lines
 
+
+# ── Standalone test ────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     from bg_remover import remove_background, alpha_to_binary_mask
@@ -368,5 +380,5 @@ if __name__ == "__main__":
 
     print("=" * 40)
     for k, v in measurements.items():
-        print(f"  {k:<14}: {v}")
+        print(f"  {k:<16}: {v}")
     print("=" * 40)

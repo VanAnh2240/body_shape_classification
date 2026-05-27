@@ -1,5 +1,5 @@
 # file config.py
-IMAGE_PATH   = "test6.jpg"
+IMAGE_PATH   = "test3.jpg"
 MODEL_PATH   = "pose_landmarker.task"
 KP_JSON      = "keypoints.json"
 BG_REMOVED   = "bg_removed.png"
