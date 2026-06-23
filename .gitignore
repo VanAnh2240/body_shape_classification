@@ -1,4 +1,14 @@
 .venv/
 __pycache__/
-.jpg
-.png
+*.jpg
+*.png
+dataset/
+results/
+results_demo/
+*.json
+
+test_demo/
+test_demo.py
+test.py
+
+api.py

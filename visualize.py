@@ -1,9 +1,10 @@
 """
-visualize.py  v2
+visualize.py  v3
 Hỗ trợ đường đo nghiêng (oriented lines) từ body_measurements v2.
++ Thêm high_hip line (màu hồng tím) — v3
 
 Output:
-  - output_measurements.png  : ảnh clean (3 đường đo nghiêng + label)
+  - output_measurements.png  : ảnh clean (4 đường đo nghiêng + label)
   - output_debug.png         : ảnh debug đầy đủ
 """
 
@@ -11,9 +12,10 @@ import cv2
 import numpy as np
 
 COLORS = {
-    "shoulder": (0, 165, 255),   # cam
-    "waist":    (0, 220, 80),    # xanh lá
-    "hip":      (80, 80, 255),   # xanh dương
+    "shoulder": (0, 165, 255),    # cam
+    "waist":    (0, 220, 80),     # xanh lá
+    "high_hip": (180, 60, 220),   # tím hồng  ← mới
+    "hip":      (80, 80, 255),    # xanh dương
 }
 
 ARM_KP_COLOR    = (255, 0, 255)
@@ -138,11 +140,13 @@ def _draw_legend(img, measurements: dict):
          measurements.get("shoulder_angle", 0)),
         ("waist",    COLORS["waist"],    measurements["waist_px"],    measurements["waist_ratio"],
          measurements.get("waist_angle", 0)),
+        ("high_hip", COLORS["high_hip"], measurements["high_hip_px"], measurements["high_hip_ratio"],
+         measurements.get("high_hip_angle", 0)),
         ("hip",      COLORS["hip"],      measurements["hip_px"],      measurements["hip_ratio"],
          measurements.get("hip_angle", 0)),
     ]
 
-    box_w, box_h = 240, 18 * len(lines_data) + 48
+    box_w, box_h = 260, 18 * len(lines_data) + 48
     x0 = W - box_w - 16
     y0 = 16
 
@@ -159,7 +163,7 @@ def _draw_legend(img, measurements: dict):
     for i, (name, color, px, ratio, angle) in enumerate(lines_data):
         ty = y0 + 48 + i * 18
         cv2.rectangle(img, (x0 + 10, ty - 10), (x0 + 22, ty + 2), color, -1)
-        text = f"{name:<5}  {px:>6.0f}px  {ratio:.3f}  {angle:+.1f}deg"
+        text = f"{name:<8}  {px:>6.0f}px  {ratio:.3f}  {angle:+.1f}deg"
         cv2.putText(img, text, (x0 + 30, ty),
                     FONT, 0.38, (220, 220, 220), 1, cv2.LINE_AA)
 
@@ -186,6 +190,7 @@ def _draw_color_key(img):
     items = [
         (COLORS["shoulder"],   "Shoulder line (oriented)"),
         (COLORS["waist"],      "Waist line (oriented)"),
+        (COLORS["high_hip"],   "High Hip line (oriented)"),   # ← mới
         (COLORS["hip"],        "Hip line (oriented)"),
         (ARM_KP_COLOR,         "Arm skeleton (exclusion)"),
         ((255, 200, 0),        "Shoulder keypoints"),
@@ -208,6 +213,10 @@ def _draw_color_key(img):
 
 # ── Public API ────────────────────────────────────────────────────────────
 
+# Thứ tự vẽ 4 đường: shoulder → waist → high_hip → hip
+_LINE_ORDER = ["shoulder", "waist", "high_hip", "hip"]
+
+
 def draw_measurements(
     image_path: str,
     measurements: dict,
@@ -220,9 +229,12 @@ def draw_measurements(
     # ── CLEAN OUTPUT ──────────────────────────────────────────────────────
     img_clean = _load(image_path)
 
-    for name, info in lines.items():
+    for name in _LINE_ORDER:
+        if name not in lines:
+            continue
+        info  = lines[name]
         color = COLORS[name]
-        label = f"{name[0].upper()}"
+        label = f"{name[0].upper()}" if name != "high_hip" else "HH"
         _draw_measure_line(img_clean, info, color, label)
         _draw_tick_marks(img_clean, info, color)
 
@@ -237,7 +249,10 @@ def draw_measurements(
     img_dbg = _load(image_path)
 
     # 1. Scan bands nghiêng
-    for name, info in lines.items():
+    for name in _LINE_ORDER:
+        if name not in lines:
+            continue
+        info  = lines[name]
         color = COLORS[name]
         px    = measurements[f"{name}_px"]
         ratio = measurements[f"{name}_ratio"]

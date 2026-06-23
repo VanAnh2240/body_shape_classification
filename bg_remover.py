@@ -1,7 +1,5 @@
 """
 bg_remover.py
-Remove background ảnh, trả về ảnh BGRA (alpha = 0 là background).
-Dùng thư viện rembg (pip install rembg).
 """
 
 import cv2
@@ -14,10 +12,7 @@ except ImportError:
     _REMBG_AVAILABLE = False
 
 
-# ── Fallback: GrabCut nếu không có rembg ─────────────────────────────────────
-
 def _grabcut_remove_bg(bgr: np.ndarray) -> np.ndarray:
-    """Dùng GrabCut đơn giản làm fallback khi không có rembg."""
     h, w = bgr.shape[:2]
     mask = np.zeros((h, w), np.uint8)
     rect = (int(w * 0.05), int(h * 0.02), int(w * 0.90), int(h * 0.96))
@@ -30,23 +25,12 @@ def _grabcut_remove_bg(bgr: np.ndarray) -> np.ndarray:
     bgra[:, :, 3] = fg_mask
     return bgra
 
-
-# ── API chính ─────────────────────────────────────────────────────────────────
-
 def remove_background(image_path: str, output_path: str | None = None) -> np.ndarray:
-    """
-    Đọc ảnh, remove background.
-
-    Returns
-    -------
-    bgra : np.ndarray  shape (H, W, 4), alpha=255 là người, alpha=0 là bg
-    """
     bgr = cv2.imread(image_path)
     if bgr is None:
         raise FileNotFoundError(f"Không đọc được ảnh: {image_path}")
 
     if _REMBG_AVAILABLE:
-        # rembg nhận bytes PNG, trả bytes PNG với alpha
         import io
         from PIL import Image
         pil_img = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))

@@ -1,7 +1,5 @@
 """
 pose_estimator.py
-Detect pose landmarks và lưu keypoints JSON.
-Không dùng segmentation mask.
 """
 
 import json
@@ -20,11 +18,10 @@ mp_pose    = mp.solutions.pose
 
 
 def detect_pose(image_path: str, model_path: str) -> tuple[list, int, int]:
-    """Chạy PoseLandmarker, trả về (keypoints_list, height, width)."""
     base_options = python.BaseOptions(model_asset_path=model_path)
     options = vision.PoseLandmarkerOptions(
         base_options=base_options,
-        output_segmentation_masks=False,   # không cần mask nữa
+        output_segmentation_masks=False,
     )
     detector = vision.PoseLandmarker.create_from_options(options)
 
@@ -48,7 +45,6 @@ def detect_pose(image_path: str, model_path: str) -> tuple[list, int, int]:
 
 
 def draw_pose_overlay(image: mp.Image, result, output_path: str):
-    """Vẽ skeleton lên ảnh gốc và lưu."""
     annotated = cv2.cvtColor(image.numpy_view().copy(), cv2.COLOR_RGB2BGR)
 
     for pose_landmarks in result.pose_landmarks:
