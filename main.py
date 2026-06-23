@@ -1,11 +1,5 @@
 """
-main.py  —  Pipeline đo body shape
-=====================================================
-Bước 1: pose_estimator.py  → keypoints.json
-Bước 2: bg_remover.py      → mask từ ảnh đã remove bg
-Bước 3: body_measurements  → shoulder / waist / high_hip / hip (px)
-Bước 4: classify           → body shape (FFIT 5 loại)
-Bước 5: visualize          → output_measurements.png
+main.py
 """
 
 from pose_estimator       import detect_pose, draw_pose_overlay
@@ -37,7 +31,7 @@ def main():
     bgra = remove_background(IMAGE_PATH, output_path=BG_REMOVED)
     mask = alpha_to_binary_mask(bgra)
 
-    # 3. Estimate measurements  (trả về 4 mặt cắt: shoulder/waist/high_hip/hip)
+    # 3. Estimate measurements
     print("[3/5] Estimating measurements...")
     kp = load_keypoints(KP_JSON)
     measurements, lines = estimate_measurements(kp, mask)
