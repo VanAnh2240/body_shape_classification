@@ -14,7 +14,8 @@ RIGHT_WRIST    = 16
 LEFT_HIP       = 23
 RIGHT_HIP      = 24
 
-WAIST_T          = 0.6
+WAIST_T          = 0.6 # 60% giữa shoulder và hip
+HIGH_HIP_T       = 0.8 # 80% giữa shoulder và hip
 ROW_HALF_BAND    = 8
 ARM_PAD_PX       = 10  
 ARM_HORIZONTAL_THRESHOLD = 0.3  # nếu tay dang ngang quá thì không đo vòng tay

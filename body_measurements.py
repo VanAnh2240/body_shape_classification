@@ -16,8 +16,8 @@ RIGHT_WRIST     = config.RIGHT_WRIST
 LEFT_HIP        = config.LEFT_HIP
 RIGHT_HIP       = config.RIGHT_HIP
 
-WAIST_T         = config.WAIST_T   # 0.6 vai và hông
-HIGH_HIP_T      = 0.80             # high hip ≈ 80% giữa shoulder và hip
+WAIST_T         = config.WAIST_T   
+HIGH_HIP_T      = config.HIGH_HIP_T     
 
 ARM_PAD_PX      = config.ARM_PAD_PX
 TRACE_STEP          = 0.5
@@ -173,9 +173,9 @@ def estimate_measurements(kp: dict, mask: np.ndarray) -> tuple[dict, dict]:
     eff_left_arm  = left_arm_pts  if not left_arm_horizontal else []
     eff_right_arm = right_arm_pts if not right_arm_horizontal else []
 
-    lw_kp  = ls + WAIST_T    * (lh - ls)   # waist trái   (t=0.60)
+    lw_kp  = ls + WAIST_T    * (lh - ls)   # waist trái
     rw_kp  = rs + WAIST_T    * (rh - rs)   # waist phải
-    lhh_kp = ls + HIGH_HIP_T * (lh - ls)   # high_hip trái (t=0.80)
+    lhh_kp = ls + HIGH_HIP_T * (lh - ls)   # high_hip trái
     rhh_kp = rs + HIGH_HIP_T * (rh - rs)   # high_hip phải
 
     shoulder_info  = _measure_oriented_line(mask, ls,     rs,     eff_left_arm, eff_right_arm, "shoulder")

@@ -1,20 +1,13 @@
 """
 bodyshape_classifier.py
-
-Quy đổi:
-  ±1"   → ±0.06 * S
-  3.6"  → 0.21  * S
-  9"    → 0.53  * S   (bust/shoulder-to-waist)
-  10"   → 0.59  * S   (hip-to-waist)
-  7"    → 0.41  * S   (hip-to-waist ngưỡng Spoon)
 """
 
-_R_BUST_HIP_SAME   = 0.06   # |shoulder - hip| < ngưỡng → coi bằng nhau (FFIT: 1")
-_R_WAIST_DEF_S     = 0.53   # shoulder - waist >= ngưỡng → định nghĩa eo rõ (FFIT: 9")
-_R_WAIST_DEF_H     = 0.59   # hip      - waist >= ngưỡng → định nghĩa eo rõ (FFIT: 10")
-_R_WAIST_SPOON     = 0.41   # hip      - waist >= ngưỡng → Spoon              (FFIT: 7")
-_R_HIP_BUST_LARGE  = 0.21   # hip - shoulder  >= ngưỡng → hip dominates      (FFIT: 3.6")
-_HIGH_HIP_WAIST_R  = 1.193  # high_hip / waist > ngưỡng → Spoon (FFIT: giữ nguyên)
+_R_BUST_HIP_SAME   = 0.06   # |shoulder - hip| < ngưỡng => coi bằng nhau (FFIT: 1")
+_R_WAIST_DEF_S     = 0.53   # shoulder - waist >= ngưỡng => định nghĩa eo rõ (FFIT: 9")
+_R_WAIST_DEF_H     = 0.59   # hip - waist >= ngưỡng => định nghĩa eo rõ (FFIT: 10")
+_R_WAIST_SPOON     = 0.41   # hip - waist >= ngưỡng => Spoon              (FFIT: 7")
+_R_HIP_BUST_LARGE  = 0.21   # hip - shoulder  >= ngưỡng => hip dominates      (FFIT: 3.6")
+_HIGH_HIP_WAIST_R  = 1.193  # high_hip / waist > ngưỡng => Spoon (FFIT: giữ nguyên)
 
 
 def classify(
