@@ -1,21 +1,15 @@
 """
-visualize.py  v3
-Hỗ trợ đường đo nghiêng (oriented lines) từ body_measurements v2.
-+ Thêm high_hip line (màu hồng tím) — v3
-
-Output:
-  - output_measurements.png  : ảnh clean (4 đường đo nghiêng + label)
-  - output_debug.png         : ảnh debug đầy đủ
+visualize.py
 """
 
 import cv2
 import numpy as np
 
 COLORS = {
-    "shoulder": (0, 165, 255),    # cam
-    "waist":    (0, 220, 80),     # xanh lá
-    "high_hip": (180, 60, 220),   # tím hồng  ← mới
-    "hip":      (80, 80, 255),    # xanh dương
+    "shoulder": (0, 165, 255),  
+    "waist":    (0, 220, 80),    
+    "high_hip": (180, 60, 220), 
+    "hip":      (80, 80, 255),  
 }
 
 ARM_KP_COLOR    = (255, 0, 255)
@@ -53,44 +47,34 @@ def _label_bg(img, x, y, text, color, font_scale=0.5, thickness=1):
 
 def _draw_measure_line(img, info: dict, color: tuple, label: str,
                        thickness: int = LINE_THICKNESS, show_band: bool = False):
-    """
-    Vẽ đường đo nghiêng: p0 → p1 (có thể không ngang).
-    Midpoint tính từ p0, p1 thực tế.
-    """
     p0  = tuple(info["p0"].astype(int))
     p1  = tuple(info["p1"].astype(int))
     mid = tuple(info["midpoint"].astype(int))
 
-    # Scan band (debug): vẽ hình chữ nhật song song với đường đo
     if show_band:
         _draw_oriented_band(img, info, band_px=8)
 
-    # Đường chính
     cv2.line(img, p0, p1, color, thickness, cv2.LINE_AA)
 
-    # Endpoints
     for pt in (p0, p1):
         cv2.circle(img, pt, CIRCLE_RADIUS + 2, color, 1, cv2.LINE_AA)
         cv2.circle(img, pt, CIRCLE_RADIUS,     color, -1)
 
-    # Midpoint
     cv2.circle(img, mid, 4, color, -1)
 
-    # Label
     lx = mid[0] - 2
     ly = mid[1] - 14
     _label_bg(img, lx, ly, label, color, font_scale=0.5)
 
 
 def _draw_oriented_band(img, info: dict, band_px: int = 8, alpha: float = 0.07):
-    """Vẽ band mờ song song với đường đo nghiêng."""
     p0  = info["p0"]
     p1  = info["p1"]
     d   = p1 - p0
     n   = np.linalg.norm(d)
     if n < 1e-6:
         return
-    perp = np.array([-d[1], d[0]]) / n * band_px  # pháp tuyến, độ dài band_px
+    perp = np.array([-d[1], d[0]]) / n * band_px 
 
     pts = np.array([
         p0 + perp, p1 + perp,
@@ -103,14 +87,13 @@ def _draw_oriented_band(img, info: dict, band_px: int = 8, alpha: float = 0.07):
 
 
 def _draw_tick_marks(img, info: dict, color: tuple, tick_h: int = 8):
-    """Vẽ tick mark vuông góc với đường đo tại 2 đầu."""
     p0 = info["p0"]
     p1 = info["p1"]
     d  = p1 - p0
     n  = np.linalg.norm(d)
     if n < 1e-6:
         return
-    perp = np.array([-d[1], d[0]]) / n * tick_h  # vuông góc
+    perp = np.array([-d[1], d[0]]) / n * tick_h 
 
     for pt in (p0, p1):
         tp0 = tuple((pt + perp).astype(int))
@@ -169,7 +152,6 @@ def _draw_legend(img, measurements: dict):
 
 
 def _draw_keypoint_anchors(img, kp: dict):
-    """Vẽ các keypoint dùng làm anchor: shoulder, hip."""
     anchors = {
         11: ("lsho", (255, 200, 0)),
         12: ("rsho", (255, 200, 0)),
@@ -188,13 +170,13 @@ def _draw_keypoint_anchors(img, kp: dict):
 def _draw_color_key(img):
     H, W = img.shape[:2]
     items = [
-        (COLORS["shoulder"],   "Shoulder line (oriented)"),
-        (COLORS["waist"],      "Waist line (oriented)"),
-        (COLORS["high_hip"],   "High Hip line (oriented)"),   # ← mới
-        (COLORS["hip"],        "Hip line (oriented)"),
-        (ARM_KP_COLOR,         "Arm skeleton (exclusion)"),
+        (COLORS["shoulder"],   "Shoulder line"),
+        (COLORS["waist"],      "Waist line"),
+        (COLORS["high_hip"],   "High Hip line"),  
+        (COLORS["hip"],        "Hip line"),
+        (ARM_KP_COLOR,         "Arm skeleton"),
         ((255, 200, 0),        "Shoulder keypoints"),
-        ((0, 255, 255),        "Hip keypoints (anchor)"),
+        ((0, 255, 255),        "Hip keypoints"),
     ]
     line_h = 16
     box_h  = line_h * len(items) + 20
@@ -210,10 +192,6 @@ def _draw_color_key(img):
         cv2.putText(img, text, (x0 + 28, ty),
                     FONT, 0.38, (210, 210, 210), 1, cv2.LINE_AA)
 
-
-# ── Public API ────────────────────────────────────────────────────────────
-
-# Thứ tự vẽ 4 đường: shoulder → waist → high_hip → hip
 _LINE_ORDER = ["shoulder", "waist", "high_hip", "hip"]
 
 
@@ -223,10 +201,9 @@ def draw_measurements(
     lines: dict,
     output_path: str = "output_measurements.png",
     kp: dict | None = None,
-    debug_arms: bool = False,   # giữ để tương thích
+    debug_arms: bool = False, 
     save_debug: bool = True,
 ):
-    # ── CLEAN OUTPUT ──────────────────────────────────────────────────────
     img_clean = _load(image_path)
 
     for name in _LINE_ORDER:
@@ -241,14 +218,12 @@ def draw_measurements(
     cv2.imwrite(output_path, img_clean)
     print(f"Clean  → {output_path}")
 
-    # ── DEBUG OUTPUT ──────────────────────────────────────────────────────
     if not save_debug:
         return
 
     debug_path = output_path.replace(".png", "_debug.png")
     img_dbg = _load(image_path)
 
-    # 1. Scan bands nghiêng
     for name in _LINE_ORDER:
         if name not in lines:
             continue
@@ -262,18 +237,14 @@ def draw_measurements(
                            thickness=LINE_THICKNESS + 1, show_band=True)
         _draw_tick_marks(img_dbg, info, color, tick_h=12)
 
-    # 2. Arm skeleton
     if kp is not None:
         _draw_arm_skeleton(img_dbg, kp)
 
-    # 3. Keypoint anchors
     if kp is not None:
         _draw_keypoint_anchors(img_dbg, kp)
 
-    # 4. Legend
     _draw_legend(img_dbg, measurements)
 
-    # 5. Color key
     _draw_color_key(img_dbg)
 
     cv2.imwrite(debug_path, img_dbg)

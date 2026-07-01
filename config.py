@@ -5,8 +5,6 @@ KP_JSON      = "keypoints.json"
 BG_REMOVED   = "bg_removed.png"
 OUTPUT_IMAGE = "output_measurements.png"
 
-
-# ── Keypoint indices (MediaPipe Pose) ───────────────────────────────────────
 LEFT_SHOULDER  = 11
 RIGHT_SHOULDER = 12
 LEFT_ELBOW     = 13

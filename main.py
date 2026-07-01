@@ -36,7 +36,7 @@ def main():
     kp = load_keypoints(KP_JSON)
     measurements, lines = estimate_measurements(kp, mask)
 
-    # 4. Classify body shape (FFIT)
+    # 4. Classify body shape
     print("[4/5] Classifying body shape...")
     shape = classify(
         shoulder_px  = measurements["shoulder_px"],
@@ -49,7 +49,7 @@ def main():
     print("[5/5] Drawing measurements...")
     draw_measurements(BG_REMOVED, measurements, lines, OUTPUT_IMAGE, kp=kp, debug_arms=True)
 
-    # ── Summary ───────────────────────────────────────────────────────────────
+
     print()
     print("=" * 45)
     print(f"  Shoulder  : {measurements['shoulder_px']:.0f} px  (ratio {measurements['shoulder_ratio']:.3f})")

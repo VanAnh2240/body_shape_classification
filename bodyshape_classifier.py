@@ -56,10 +56,10 @@ def classify(
         return "Inverted Triangle"
 
     # ── 4. Triangle ───────────────────────────────────────────────────────
-    # FFIT: hips-bust ≥ 3.6" AND hips-waist < 9"   (tìm SAU Spoon và Bottom Hourglass)
+    # FFIT: hips-bust ≥ 3.6" AND hips-waist < 9" 
     if hs_diff >= _R_HIP_BUST_LARGE * S and hw_diff < _R_WAIST_DEF_S * S:
         return "Triangle"
 
-    # ── 5. Rectangle (mặc định) ───────────────────────────────────────────
+    # ── 5. Rectangle ───────────────────────────────────────────
     # FFIT: |bust-hips| < 3.6" AND bust-waist < 9" AND hips-waist < 10"
     return "Rectangle"

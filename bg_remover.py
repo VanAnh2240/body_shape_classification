@@ -40,7 +40,7 @@ def remove_background(image_path: str, output_path: str | None = None) -> np.nda
         pil_out = Image.open(buf_out).convert("RGBA")
         bgra = cv2.cvtColor(np.array(pil_out), cv2.COLOR_RGBA2BGRA)
     else:
-        print("[bg_remover] rembg không có sẵn, dùng GrabCut fallback.")
+        print("[bg_remover] rembg không có sẵn.")
         bgra = _grabcut_remove_bg(bgr)
 
     if output_path:
@@ -50,7 +50,6 @@ def remove_background(image_path: str, output_path: str | None = None) -> np.nda
 
 
 def alpha_to_binary_mask(bgra: np.ndarray, threshold: int = 127) -> np.ndarray:
-    """Chuyển kênh alpha → binary mask uint8 (0/1)."""
     return (bgra[:, :, 3] > threshold).astype(np.uint8)
 
 

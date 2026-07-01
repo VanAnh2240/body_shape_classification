@@ -16,12 +16,10 @@ RIGHT_WRIST     = config.RIGHT_WRIST
 LEFT_HIP        = config.LEFT_HIP
 RIGHT_HIP       = config.RIGHT_HIP
 
-WAIST_T         = config.WAIST_T   # 0.6
+WAIST_T         = config.WAIST_T   # 0.6 vai và hông
 HIGH_HIP_T      = 0.80             # high hip ≈ 80% giữa shoulder và hip
 
 ARM_PAD_PX      = config.ARM_PAD_PX
-
-# ── Tuning params ─────────────────────────────────────────────────────────
 TRACE_STEP          = 0.5
 MAX_GAP_PX          = 4
 ARM_EXCLUSION_DIST  = 18
@@ -36,9 +34,6 @@ def load_keypoints(path: str = "keypoints.json") -> dict:
 def _kp_xy(kp: dict, idx: int) -> np.ndarray:
     p = kp[idx]
     return np.array([p["x_pixel"], p["y_pixel"]], dtype=float)
-
-
-# ── Geometry helpers ───────────────────────────────────────────────────────
 
 def _unit(v: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(v)
@@ -79,9 +74,6 @@ def _point_near_arm(
         if _dist_point_to_segment(p, a, b) < threshold:
             return True
     return False
-
-
-# ── Core: trace đường qua 2 keypoint đến biên mask ────────────────────────
 
 def _trace_to_edge(
     mask: np.ndarray,
@@ -151,9 +143,6 @@ def _measure_oriented_line(
         "angle_deg": float(np.degrees(np.arctan2(direction[1], direction[0]))),
     }
 
-
-# ── Arm geometry helpers ───────────────────────────────────────────────────
-
 def _is_arm_horizontal(arm_pts: list) -> bool:
     if len(arm_pts) < 2:
         return False
@@ -164,8 +153,6 @@ def _is_arm_horizontal(arm_pts: list) -> bool:
         return False
     return (dy / dx) < config.ARM_HORIZONTAL_THRESHOLD
 
-
-# ── Public API ─────────────────────────────────────────────────────────────
 
 def estimate_measurements(kp: dict, mask: np.ndarray) -> tuple[dict, dict]:
     ls = _kp_xy(kp, LEFT_SHOULDER)
@@ -186,19 +173,16 @@ def estimate_measurements(kp: dict, mask: np.ndarray) -> tuple[dict, dict]:
     eff_left_arm  = left_arm_pts  if not left_arm_horizontal else []
     eff_right_arm = right_arm_pts if not right_arm_horizontal else []
 
-    # ── Keypoints nội suy ─────────────────────────────────────────────────
     lw_kp  = ls + WAIST_T    * (lh - ls)   # waist trái   (t=0.60)
     rw_kp  = rs + WAIST_T    * (rh - rs)   # waist phải
     lhh_kp = ls + HIGH_HIP_T * (lh - ls)   # high_hip trái (t=0.80)
     rhh_kp = rs + HIGH_HIP_T * (rh - rs)   # high_hip phải
 
-    # ── Đo 4 mặt cắt ─────────────────────────────────────────────────────
     shoulder_info  = _measure_oriented_line(mask, ls,     rs,     eff_left_arm, eff_right_arm, "shoulder")
     waist_info     = _measure_oriented_line(mask, lw_kp,  rw_kp,  eff_left_arm, eff_right_arm, "waist")
     high_hip_info  = _measure_oriented_line(mask, lhh_kp, rhh_kp, eff_left_arm, eff_right_arm, "high_hip")
     hip_info       = _measure_oriented_line(mask, lh,     rh,     eff_left_arm, eff_right_arm, "hip")
 
-    # ── Output dict ───────────────────────────────────────────────────────
     ref = shoulder_info["width_px"] if shoulder_info["width_px"] > 0 else 1.0
     measurements = {
         "shoulder_px":    round(shoulder_info["width_px"],  1),
