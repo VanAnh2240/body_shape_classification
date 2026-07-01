@@ -31,8 +31,8 @@ def classify(
     hh = high_hip_px if (high_hip_px is not None and high_hip_px > 1e-6) \
          else (waist_px + hip_px) / 2.0
 
-    sh_diff  = shoulder_px - hip_px          # shoulder - hip  (>0: vai rộng hơn)
-    hs_diff  = hip_px - shoulder_px          # hip - shoulder  (>0: hông rộng hơn)
+    sh_diff  = shoulder_px - hip_px          # shoulder - hip 
+    hs_diff  = hip_px - shoulder_px          # hip - shoulder 
     sw_diff  = shoulder_px - waist_px        # shoulder - waist
     hw_diff  = hip_px      - waist_px        # hip - waist
     hh_waist = hh / waist_px                 # high_hip / waist ratio
